@@ -1,15 +1,16 @@
 ---
 name: figma-mcp-connection
-description: Use when establishing connection to Figma via MCP, parsing Figma URLs to extract fileKey/nodeId, verifying MCP read/write capabilities, or troubleshooting "no MCP servers configured" errors. Provides canonical procedures based on real-world experience.
+description: Use when establishing connection to Figma via MCP, parsing Figma URLs to extract fileKey/nodeId, verifying MCP read/write capabilities, writing components to existing files via use_figma, or troubleshooting MCP issues. Provides canonical procedures based on real-world experience including 2026-05-20 write experiment.
 ---
 
-# Skill: Figma MCP Connection
+# Skill: Figma MCP Connection (v2)
 
-> Стандартизованная процедура подключения и работы с Figma через MCP. Создана по результатам работы на проекте Nfluence.
+> Стандартизованная процедура подключения и работы с Figma через MCP.
+> Обновлено 2026-05-20 после эксперимента с write через `use_figma`.
 
 ## Зачем этот skill
 
-При работе с Figma через Claude Code регулярно возникают одни и те же ситуации: «MCP не подключён», «нужно достать fileKey из URL», «как проверить, что Variables существуют». Этот skill держит проверенные процедуры в одном месте.
+При работе с Figma через Claude Code регулярно возникают одни и те же ситуации: «MCP не подключён», «нужно достать fileKey из URL», «как создать компонент через MCP», «как проверить Variables». Этот skill держит проверенные процедуры в одном месте.
 
 ---
 
@@ -18,73 +19,45 @@ description: Use when establishing connection to Figma via MCP, parsing Figma UR
 ### Минимальная установка
 
 ```bash
-# Проверить, что есть Figma plugin для Claude Code
 claude plugin install figma@claude-plugins-official
-
-# Проверить
-claude
-> /plugin
-# должна быть figma со статусом enabled
 ```
+
+Проверка: `claude` → `/plugin` → должна быть figma, статус enabled.
 
 ### Подключение Figma Desktop MCP server
 
-1. Открыть Figma Desktop (не браузерную).
+1. Открыть Figma Desktop.
 2. Открыть любой Design-файл.
-3. Переключиться в Dev Mode (тумблер вверху).
-4. В правой панели найти блок MCP server.
-5. Включить переключатель «Enable MCP server».
-6. Скопировать URL (обычно `http://127.0.0.1:3845/mcp`).
+3. Dev Mode (тумблер вверху).
+4. Правая панель → блок MCP server → включить.
+5. Скопировать URL (`http://127.0.0.1:3845/mcp`).
 
 ```bash
-# Добавить сервер в Claude Code
 claude mcp add --transport http figma-desktop http://127.0.0.1:3845/mcp
-
-# Проверить
-claude
-> /mcp
-# должен быть figma-desktop, статус Connected
 ```
+
+Проверка: `/mcp` в Claude Code → figma-desktop, Connected.
 
 ### Если /mcp показывает «No MCP servers configured»
 
-Это может быть **stale view**. Проверка:
-
-```bash
-claude mcp list
-```
-
-Если в `mcp list` сервер есть, а в `/mcp` его нет — открой новую сессию Claude Code.
+Это **stale view**. Проверь `claude mcp list`. Если сервер есть — открой новую сессию Claude Code.
 
 ---
 
 ## 2. Парсинг Figma URL
 
-URL Figma всегда имеет структуру:
 ```
 https://www.figma.com/design/<fileKey>/<имя>?node-id=<a>-<b>&t=...
 ```
 
-| Поле | Где взять | Пример |
-|---|---|---|
-| fileKey | между `/design/` и следующим `/` | `mklugArIdryCDV59zx31u3` |
-| nodeId (для MCP) | значение `node-id`, дефис → двоеточие | `639-229` → `639:229` |
-
-### Скрипт извлечения (Python)
+- **fileKey** — между `/design/` и следующим `/`
+- **nodeId** — `node-id=639-229` → передавай как `639:229` (дефис → двоеточие)
 
 ```python
 import re
-
-url = "https://www.figma.com/design/mklugArIdryCDV59zx31u3/Практика?node-id=639-229&t=..."
-
-file_key_match = re.search(r'/design/([^/]+)/', url)
-file_key = file_key_match.group(1) if file_key_match else None
-
-node_id_match = re.search(r'node-id=([^&]+)', url)
-node_id = node_id_match.group(1).replace('-', ':') if node_id_match else None
-
-print(f"fileKey: {file_key}")
-print(f"nodeId (для MCP): {node_id}")
+url = "https://www.figma.com/design/mklugArIdryCDV59zx31u3/Практика?node-id=639-229"
+file_key = re.search(r'/design/([^/]+)/', url).group(1)
+node_id = re.search(r'node-id=([^&]+)', url).group(1).replace('-', ':')
 ```
 
 ---
@@ -95,20 +68,13 @@ print(f"nodeId (для MCP): {node_id}")
 
 ```
 mcp__plugin__figma__figma__get_metadata
-  fileKey: mklugArIdryCDV59zx31u3
-  nodeId: 639:229
+  fileKey: <key>
+  nodeId: <id>
 ```
 
 ### Если результат слишком большой
 
-Figma MCP возвращает ошибку:
-> Error: result (66 587 characters) exceeds maximum allowed tokens. Output has been saved to ...
-
-**Решение:** результат уже сохранён в файл. Не пытайся читать его построчно (Read с line-based offset не справится с большим JSON).
-
-### Обработка большого JSON через Python
-
-**Важно:** использовать UTF-8 явно, иначе кириллица превратится в `???????????`.
+При ошибке «exceeds maximum allowed tokens» — результат сохранён в файл. Использовать Python с UTF-8, **не PowerShell**:
 
 ```bash
 python -c "
@@ -120,26 +86,9 @@ print(text[:3000])
 "
 ```
 
-Для поиска по содержимому:
-```bash
-python -c "
-import json, re
-with open('путь', 'r', encoding='utf-8') as f:
-    data = json.load(f)
-text = data[0]['text']
-# Найти все имена фреймов
-names = re.findall(r'name=\"([^\"]+)\"', text)
-print(set(names))
-"
-```
-
 ### Почему PowerShell не подходит
 
-Windows PowerShell по умолчанию использует Windows-1251 для русской локали. При выводе русского текста получаются `??????`. Если необходимо использовать PowerShell — обязательно `-Encoding UTF8`:
-
-```powershell
-$content = Get-Content -Path "путь" -Encoding UTF8 -Raw
-```
+Windows PowerShell использует Windows-1251 для русской локали → кириллица превращается в `???????????`. Если PowerShell неизбежен — `Get-Content -Encoding UTF8`.
 
 ---
 
@@ -147,52 +96,80 @@ $content = Get-Content -Path "путь" -Encoding UTF8 -Raw
 
 ```
 mcp__plugin__figma__figma__get_variable_defs
-  fileKey: <fileKey>
+  fileKey: <key>
 ```
 
-### Интерпретация ответа
+- `{}` — Variables НЕ созданы. Это критическая находка для ревизии DS.
+- Не пустой объект — Variables есть.
 
-- `{}` — Variables **не созданы** в файле. Все значения захардкожены в компонентах. Это критическая находка для ревизии.
-- Не пустой объект — Variables есть. Структура: `{ collection_id: { variable_id: { name, value, ... } } }`.
+**Не доверяй документации.** В Figma может быть «секция цветов» с hex, выглядящая как DS. Но если `get_variable_defs` вернул `{}` — это документация, не работающие токены.
 
-### Не доверяй документации
-
-В Figma может быть «секция цветов» с hex-значениями, выглядящая как дизайн-система. Но если `get_variable_defs` вернул `{}` — это **документация на бумаге**, не работающие токены.
-
-**Правило ревизии:** первый шаг — `get_variable_defs`. Только потом всё остальное.
+**Правило ревизии:** первый шаг — `get_variable_defs`. Потом всё остальное.
 
 ---
 
-## 5. Write-возможности — что НЕ работает
+## 5. Write-возможности — ОБНОВЛЕНО 2026-05-20
 
-На текущей версии Figma MCP (май 2026):
+### Что РАБОТАЕТ через `use_figma`
 
-| Операция | figma-desktop | plugin:figma:figma |
-|---|---|---|
-| Чтение метаданных | ✅ | ✅ |
-| Чтение Variables | ✅ | ✅ |
-| Чтение dev-mode (CSS, dimensions) | ✅ | ✅ |
-| Создание Variables | ❌ | ⚠️ нестабильно |
-| Создание простых фреймов | ❌ | ⚠️ через `generate_figma_design` — в новый файл |
-| Создание компонентов с auto-layout | ❌ | ❌ |
-| Создание variants | ❌ | ❌ |
-| Привязка к Variables | ❌ | ❌ |
-| Адаптивные варианты mobile/tablet/desktop | ❌ | ❌ |
+`mcp__plugin__figma__figma__use_figma` — **полноценная write-операция**. Выполняет произвольный JavaScript через Figma Plugin API. Все возможности любого Figma-плагина.
 
-**Вывод:** для production-работы Figma MCP — это инструмент **чтения**. Запись делает Дарья руками или через специальные плагины Figma (Tokens Studio, html.to.design, Variants).
+**Подтверждено в эксперименте 2026-05-20** (создан Navigation/Mobile в файле Практика):
+
+| Операция | Статус |
+|---|---|
+| Создание фреймов | ✅ работает |
+| Создание Figma Components (`figma.createComponent()`) | ✅ работает |
+| Auto-layout (horizontal/vertical, space-between, padding) | ✅ работает |
+| Текстовые слои с шрифтом и размером | ✅ работает |
+| Прямоугольники, линии (`createRectangle()`) | ✅ работает |
+| Hex-цвета на заливках | ✅ работает |
+| Группировка элементов | ✅ работает |
+| Установка координат и размеров | ✅ работает |
+| Иерархия (вложенность) | ✅ работает |
+
+### Что РАБОТАЕТ С ОГОВОРКАМИ
+
+| Операция | Оговорка |
+|---|---|
+| Figma Variables (`figma.variables.*`) | API доступно. В пустой коллекции — безопасно. В существующей DS с захардкоженными компонентами — рискованно, может сломать привязки. Безопаснее через Tokens Studio. |
+| Шрифты | `figma.loadFontAsync()` работает, но только если шрифт **установлен локально или уже использован в файле**. Для нового шрифта — сначала установить или импортировать в файл вручную. |
+| ComponentSet с variants | Возможно через API, но требует опыта работы с component properties и variant naming. Не пробовали в эксперименте. |
+| Привязка к существующим Variables | Возможно через ID Variables, но требует сначала прочитать Variables через `get_variable_defs`. |
+
+### Что НЕ работает / есть ограничения
+
+| Что | Почему |
+|---|---|
+| `mcp__figma-desktop__*` (локальный сервер) | В сессии эксперимента 2026-05-20 не зарегистрировал ни одного инструмента. Возможно, требует отдельной конфигурации. Все write идёт через `plugin:figma:figma`. |
+| `get_metadata` на всю страницу сразу | Ответ может быть ~400 КБ XML, не помещается в контекст. Работать с конкретными node ID. |
+| Скрипт `use_figma` если файл закрыт | Файл **должен быть открыт в Figma Desktop** в момент вызова. Это не облачный REST API, это плагин. |
+| Атомарность | Скрипт целиком — атомарная транзакция. Упал = ничего не создалось. Лучше дробить сложные операции на мини-скрипты с проверкой после каждого. |
+
+### Другие инструменты записи
+
+| Инструмент | Назначение |
+|---|---|
+| `mcp__plugin__figma__figma__create_new_file` | Создание нового пустого файла |
+| `mcp__plugin__figma__figma__upload_assets` | Загрузка изображений/ассетов |
+| `mcp__plugin__figma__figma__add_code_connect_map` | Code Connect (маппинг компонент ↔ код) |
+| `mcp__plugin__figma__figma__generate_figma_design` | Генерация дизайна (отдельная задача) |
 
 ---
 
-## 6. Рекомендуемые плагины Figma для записи
+## 6. Когда что использовать — карта решений
 
-Эти плагины **компенсируют** ограничения MCP, принимая на вход подготовленные Claude данные:
-
-| Плагин | Назначение | Вход от Claude |
+| Задача | Инструмент | Почему |
 |---|---|---|
-| **Tokens Studio for Figma** | Создаёт Variables из JSON | JSON в формате Tokens Studio |
-| **html.to.design** | Превращает HTML/CSS в редактируемые слои Figma | HTML-разметка экрана/компонента |
-| **Variants** | Генерирует состояния компонента | Список состояний |
-| **Content Reel** | Заполняет тексты реалистичным контентом | (не нужен ввод от Claude) |
+| Создать простой компонент в существующем файле | `use_figma` | Работает, проверено |
+| Создать сложный компонент с variants и properties | `use_figma` с поэтапными скриптами + ручная доводка | Variants через API сложно |
+| Создать Variables в чистой DS | `use_figma` (`figma.variables.*`) | Безопасно в пустой коллекции |
+| Создать Variables в существующей DS с привязками | **Tokens Studio for Figma** (плагин) | Безопаснее, не сломает существующее |
+| Создать макет страницы из дизайн-системы | `use_figma` итерационно (компонент за компонентом) | Работает |
+| Импортировать готовый HTML-макет | **html.to.design** (плагин) | Быстрее, чем создавать с нуля |
+| Сгенерировать состояния компонента (hover/focus/etc) | **Variants** (плагин Figma) | Автоматизация состояний |
+
+**Принцип:** MCP-запись — мощно, но иногда плагины Figma — безопаснее и быстрее. Под каждую задачу — свой инструмент.
 
 ---
 
@@ -205,39 +182,65 @@ Claude (как агент-роль): инструкции из .claude/agents/
    ↓
 Claude (если нужен Figma): mcp__plugin__figma__figma__*
    ↓
-Claude (если нужно создавать в Figma): JSON / HTML / спецификация
+ВЕТКИ:
+   ├── Простая запись → Claude через use_figma → готово
+   ├── Сложная запись → Claude готовит JSON/HTML → Дарья через плагин Figma
+   └── Чтение / ревизия → Claude через get_metadata/get_variable_defs
    ↓
-Дарья: открывает плагин в Figma, импортирует
-   ↓
-Figma: реальные Variables / компоненты появляются
-   ↓
-Claude: повторно вызывает MCP для проверки
+Claude: повторный вызов MCP для проверки (через get_metadata по нужным node ID)
    ↓
 Дарья: коммит в Git
 ```
 
 ---
 
-## 8. Lessons learned
+## 8. Безопасность при write-операциях
 
-> Уроки из реальной работы со skill'ом. Обновляется после каждой существенной находки.
+### Перед каждой write-сессией
 
-- **2026-05-18 —** Перезапуск секретаря в той же сессии не сделал реальные вызовы MCP, переиспользовав данные предыдущей сессии.
-  - **Почему:** контекст-окно сессии хранит результаты прошлых tool calls, модель оптимизирует токены.
-  - **Правило:** для повторного запуска агента — НОВАЯ сессия Claude Code. Удалить или переименовать предыдущий артефакт.
+1. **Бэкап файла** — File → Save local copy (`.fig` на диск) + Duplicate в облаке.
+2. **Файл открыт в Figma Desktop** — закрытый файл не работает.
+3. **Понятен node ID родительского контейнера** — куда положим новые узлы.
+4. **Если работаешь с Variables — сначала `get_variable_defs`** — увидеть существующее.
 
-- **2026-05-18 —** PowerShell исказил русские символы при парсинге JSON-результата MCP (получились `???????????`).
-  - **Почему:** Windows PowerShell использует Windows-1251 для русской локали по умолчанию.
-  - **Правило:** для работы с русским текстом — Python с `encoding='utf-8'`, не PowerShell. Если PowerShell неизбежен — `-Encoding UTF8`.
+### После каждой write-операции
 
-- **2026-05-18 —** `get_metadata` для большого фрейма (67 слайдов брифа) превысил лимит токенов.
-  - **Почему:** Figma-фреймы с большим количеством вложенных текстов отдают огромные JSON.
-  - **Правило:** при ошибке «exceeds maximum allowed tokens» — не пытаться читать сохранённый файл построчно. Использовать Python для парсинга JSON и извлечения нужных полей.
+1. **Проверка через `get_metadata`** на node ID созданного объекта.
+2. **Скриншот** (если поддерживается `await node.screenshot()`) — для верификации в файле.
+3. **Запись в CHANGELOG** проекта — что создано, когда, каким скриптом.
 
-- **2026-05-18 —** Документация UI-kit заявляла 9 цветовых токенов, но `get_variable_defs` вернул `{}`.
-  - **Почему:** дизайнеры часто описывают цветовые «токены» как визуальный список в Figma, не создавая настоящие Variables.
-  - **Правило:** при ревизии DS первый шаг — `get_variable_defs`. Документация и реальность могут расходиться.
+### Если что-то пошло не так
 
-- **2026-05-18 (внешний источник, meta-pp template) —** Subagent'ы Claude Code (через `.claude/agents/*.md` как отдельные процессы) НЕ наследуют подключение к MCP-серверам, даже если перечислить `mcp__*` тулзы в `tools:`.
-  - **Почему:** MCP-серверы аутентифицируются в процессе родительского агента. Subagent запускается изолированно. Поле `tools:` только фильтрует список тулзов, не создаёт сессию.
-  - **Правило:** все Figma-операции исполняет родительский агент. У нас «агенты» = роли через переключение, не настоящие Claude Code subagents.
+- **Атомарность скрипта** = ничего не создалось (Figma откатывает).
+- **Если создалось, но криво** — Ctrl+Z в Figma Desktop, или удалить созданное вручную.
+- **В крайнем случае** — восстановление из бэкапа.
+
+---
+
+## 9. Lessons learned
+
+> Уроки из реальной работы со skill'ом.
+
+- **2026-05-18 —** Перезапуск секретаря в той же сессии не сделал реальные вызовы MCP.
+  - **Почему:** контекст-окно хранит результаты прошлых tool calls.
+  - **Правило:** для повторных запусков — НОВАЯ сессия Claude Code.
+
+- **2026-05-18 —** PowerShell исказил русские символы при парсинге JSON из MCP.
+  - **Почему:** Windows-1251 по умолчанию.
+  - **Правило:** Python с `encoding='utf-8'`, не PowerShell.
+
+- **2026-05-18 —** `get_metadata` для большого фрейма превысил лимит токенов (~400 KB JSON).
+  - **Почему:** Figma-фреймы с большим количеством вложенностей отдают огромные XML.
+  - **Правило:** при ошибке «exceeds maximum allowed tokens» — Python для парсинга, работать по конкретным node ID, не «всё подряд».
+
+- **2026-05-18 —** Документация UI-kit заявляла 9 цветовых токенов, `get_variable_defs` вернул `{}`.
+  - **Почему:** дизайнеры часто описывают «токены» как визуальный список без создания Variables.
+  - **Правило:** при ревизии DS первый шаг — `get_variable_defs`.
+
+- **2026-05-20 — КРИТИЧЕСКИЙ УРОК** ⚠️: `use_figma` **работает на запись** в существующий Figma-файл. Был успешно создан Figma Component Navigation/Mobile с auto-layout, шрифтом Unbounded Bold, hex-цветами, иерархией. Все предыдущие предположения о «read-only характере» Figma MCP оказались неверны.
+  - **Почему:** инструмент `use_figma` выполняет произвольный JS через Plugin API. Полноценный плагин Figma по своим возможностям. Не был замечен при первоначальной оценке.
+  - **Правило:** для простых компонентов в существующем файле — `use_figma`. Для сложных вариативных или для Variables в существующей DS — плагины Figma (Tokens Studio, html.to.design). Бэкап перед каждой write-сессией. Файл должен быть открыт в Figma Desktop. Скрипт атомарный — дробить на мини-операции.
+
+- **2026-05-20 —** В сессии эксперимента сервер `figma-desktop` (локальный MCP по адресу `http://127.0.0.1:3845/mcp`) не зарегистрировал инструменты. Все операции прошли через `plugin:figma:figma` (облачный).
+  - **Почему:** возможно, конфигурация требует доработки или сервер figma-desktop активен только для определённых типов операций.
+  - **Правило:** для write-операций использовать `plugin:figma:figma`. Локальный `figma-desktop` — на чтение dev-mode разметки и Variables. Не блокировать работу, если только один из двух доступен.
