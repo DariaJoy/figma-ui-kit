@@ -30,11 +30,19 @@
 
 ## Состояние Figma Variables
 
-**Статус:** Variables НЕ созданы (проверено через `mcp__plugin__figma__figma__get_variable_defs` → `{}` на 2026-05-18).
+**Статус:** Variables созданы через MCP `use_figma` — 2026-05-22.
 
-Все значения (цвета, шрифты, отступы) задокументированы в Section 01 UI-kit, но в компонентах прописаны как hardcode. Это критическая находка ревизии. См. `04-ui-kit-review.md`, раздел 2.
+| Collection | ID | Mode | Переменных | Что внутри |
+|---|---|---|---|---|
+| Color | `VariableCollectionId:1195:128` | Dark | 14 | 9 тёмных токенов + 5 тег-акцентов |
+| Spacing | `VariableCollectionId:1198:128` | Default | 7 | xs(4)…3xl(64) на базе 8px |
+| Radius | `VariableCollectionId:1199:128` | Default | 6 | none/s/m/l/xl/pill(56) |
 
-**План:** Variables создаются на следующем этапе (через Tokens Studio for Figma или вручную) перед запуском `layout-designer`.
+**Text Styles:** 9 стилей уже существовали (Display/80, Heading/H1–H4, Body/L–S, Body/Caption, Label/XS — Unbounded+Onest).
+
+**Следующий шаг:** привязка Variables к существующим компонентам (спросить у Дарьи перед запуском — компонентов ~15).
+
+> Примечание: в файле также есть старая коллекция «Variable collection» (9 переменных, светлая палитра) от другого учебного проекта — не относится к Nfluence.
 
 ## Связанные файлы Figma
 
@@ -56,6 +64,7 @@
 |---|---|---|---|
 | 2026-05-18 | Initial scan — бриф, персоны, UI-kit | secretary v3 | 00-intake.md создан |
 | 2026-05-18 | Глубокий разбор UI-kit | design-system-architect (review) | 04-ui-kit-review.md, обнаружено отсутствие Variables |
+| 2026-05-22 | Создание Variables Collections | design-system-architect (create-from-extract) | Color(14) + Spacing(7) + Radius(6); Text Styles уже существовали |
 
 ## Примечания
 
